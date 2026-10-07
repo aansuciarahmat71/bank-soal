@@ -1492,7 +1492,6 @@ function OpsiList({ opsi, kunciJawaban }) {
 function SoalCard({ item, onDelete, onEdit, expanded, onToggle }) {
   const t = TINGKAT[item.tingkat] || TINGKAT.mudah;
   const isPg = item.jenisSoal === "pg";
-  const [confirmHapus, setConfirmHapus] = useState(false);
   return (
     <div
       style={{
@@ -1538,39 +1537,6 @@ function SoalCard({ item, onDelete, onEdit, expanded, onToggle }) {
           <button onClick={onToggle} style={linkBtnStyle}>
             {expanded ? "Sembunyikan pembahasan" : "Lihat pembahasan"}
           </button>
-          <button onClick={() => onEdit(item)} style={linkBtnStyle}>
-            Edit
-          </button>
-          {!confirmHapus ? (
-            <button
-              onClick={() => setConfirmHapus(true)}
-              style={{ ...linkBtnStyle, color: "var(--red)" }}
-            >
-              Hapus
-            </button>
-          ) : (
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "var(--red)", fontWeight: 600 }}>Yakin hapus?</span>
-              <button
-                onClick={() => {
-                  onDelete(item.id);
-                  setConfirmHapus(false);
-                }}
-                style={{
-                  ...linkBtnStyle,
-                  color: "var(--card)",
-                  background: "var(--red)",
-                  borderRadius: 4,
-                  padding: "4px 9px",
-                }}
-              >
-                Ya, hapus
-              </button>
-              <button onClick={() => setConfirmHapus(false)} style={linkBtnStyle}>
-                Batal
-              </button>
-            </span>
-          )}
         </div>
       </div>
       <div
