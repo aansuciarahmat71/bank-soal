@@ -1356,7 +1356,7 @@ function SoalModal({ mode, initialData, onClose, onSave, materiList, submateriBy
                   rows={6}
                   style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
                 />
-                {containsMathSyntax(form.pembahasanText) && (
+                {(containsMathSyntax(form.pembahasanText) || /^\s*=/m.test(form.pembahasanText)) && (
                   <div
                     style={{
                       marginTop: 8,
@@ -1370,7 +1370,7 @@ function SoalModal({ mode, initialData, onClose, onSave, materiList, submateriBy
                     }}
                   >
                     <div style={{ fontSize: 11, color: "var(--t4)", marginBottom: 4 }}>Pratinjau</div>
-                    <MathText text={form.pembahasanText} />
+                    <PembahasanTeks text={form.pembahasanText} />
                   </div>
                 )}
               </div>
@@ -1431,6 +1431,107 @@ function SoalModal({ mode, initialData, onClose, onSave, materiList, submateriBy
   );
 }
 
+// ==== PEMBAHASAN TERSTRUKTUR: tiap "=" pindah ke baris bawah, tanda "=" sejajar ====
+// Pecah teks pada tanda "=" tingkat-atas (di luar kurung/kurawal, bukan <=, >=, !=).
+function pecahSamaDengan(s) {
+  const bag = [];
+  let d = 0;
+  let st = 0;
+  for (let k = 0; k < s.length; k++) {
+    const c = s[k];
+    if (c === "{" || c === "(" || c === "[") d++;
+    else if (c === "}" || c === ")" || c === "]") d--;
+    else if (c === "=" && d === 0 && "<>!:=".indexOf(s[k - 1] || " ") === -1 && s[k + 1] !== "=") {
+      bag.push(s.slice(st, k).trim());
+      st = k + 1;
+    }
+  }
+  bag.push(s.slice(st).trim());
+  return bag;
+}
+
+function parsePembahasan(text) {
+  const out = [];
+  let blok = null;
+  const baris = (label, isi) => {
+    if (!blok) { blok = { jenis: "blok", baris: [] }; out.push(blok); }
+    blok.baris.push({ label, isi });
+  };
+  const teks = (t) => {
+    t = t.trim();
+    if (!t) return;
+    blok = null;
+    out.push({ jenis: "teks", t, judul: /:\s*$/.test(t) });
+  };
+  const deretan = (label, isi) => {
+    const bag = pecahSamaDengan(isi);
+    bag.forEach((p, k) => baris(k === 0 ? label : "", p));
+  };
+  String(text || "").split("\n").forEach((raw) => {
+    const t = raw.replace(/\s+$/, "");
+    if (!t.trim()) { blok = null; out.push({ jenis: "spasi" }); return; }
+    const lanjut = t.match(/^\s*=\s*(.*)$/);
+    if (lanjut) { deretan("", lanjut[1]); return; }
+    if (t.indexOf("$") !== -1) {
+      let buf = "";
+      let habisRumus = false;
+      t.split(/(\$\$[^$]+\$\$|\$[^$]+\$)/).forEach((seg) => {
+        if (!seg) return;
+        if (seg[0] === "$" && seg.length > 2) {
+          const dalam = seg.replace(/^\${1,2}|\${1,2}$/g, "");
+          const bag = pecahSamaDengan(dalam);
+          if (bag.length >= 2) {
+            teks(buf);
+            buf = "";
+            blok = null;
+            bag.forEach((p, k) => baris(k === 0 ? "$" + bag[0] + "$" : "", "$" + (k === 0 ? bag[1] : p) + "$"));
+            // baris pertama memuat label + bagian ke-2; sisanya tiap "=" satu baris
+            blok.baris = blok.baris.slice(0, 0).concat(
+              [{ label: "$" + bag[0] + "$", isi: "$" + bag[1] + "$" }],
+              bag.slice(2).map((p) => ({ label: "", isi: "$" + p + "$" }))
+            );
+            habisRumus = true;
+            return;
+          }
+          buf += seg;
+        } else {
+          buf += habisRumus ? seg.replace(/^[\s.,;]+/, " ") : seg;
+        }
+        habisRumus = false;
+      });
+      teks(buf);
+      return;
+    }
+    const awal = t.match(/^([^=:,]{1,24}?)\s=\s(.+)$/);
+    if (awal) { deretan(awal[1].trim(), awal[2]); return; }
+    teks(t);
+  });
+  return out;
+}
+
+function PembahasanTeks({ text }) {
+  const bagian = useMemo(() => parsePembahasan(text), [text]);
+  return (
+    <div style={{ lineHeight: 1.7, whiteSpace: "normal" }}>
+      {bagian.map((b, i) => {
+        if (b.jenis === "spasi") return <div key={i} style={{ height: 8 }} />;
+        if (b.jenis === "teks") return <div key={i} style={{ fontWeight: b.judul ? 700 : 400, color: b.judul ? "var(--t1)" : "inherit" }}><MathText text={b.t} /></div>;
+        return (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "max-content 14px minmax(0, 1fr)", columnGap: 8, margin: "2px 0 2px 12px" }}>
+            {b.baris.map((r, j) => (
+              <React.Fragment key={j}>
+                <span style={{ textAlign: "right", fontWeight: 600 }}>{r.label ? <MathText text={r.label} /> : null}</span>
+                <span style={{ color: "var(--blue)", fontWeight: 700, textAlign: "center" }}>=</span>
+                <span style={{ overflowWrap: "anywhere", minWidth: 0, overflowX: "auto" }}><MathText text={r.isi} /></span>
+              </React.Fragment>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PembahasanView({ item }) {
   if (item.pembahasanType === "gambar") {
     if (!item.pembahasanImage) {
@@ -1445,7 +1546,7 @@ function PembahasanView({ item }) {
     );
   }
   return item.pembahasanText ? (
-    <MathText text={item.pembahasanText} />
+    <PembahasanTeks text={item.pembahasanText} />
   ) : (
     <span style={{ color: "var(--t4)", fontStyle: "italic" }}>Belum ada pembahasan untuk soal ini.</span>
   );
@@ -5106,7 +5207,7 @@ function BuatSoalAIModal({ onClose, onBack, onSaveMany, materiList, submateriByM
             {it.pembahasanText && (
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--line)", fontSize: 13, color: "var(--t3)", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
                 <div style={{ fontSize: 11, color: "var(--t4)", marginBottom: 4 }}>Pembahasan</div>
-                <MathText text={it.pembahasanText} />
+                <PembahasanTeks text={it.pembahasanText} />
               </div>
             )}
           </div>
@@ -5820,18 +5921,6 @@ function BankSoalFisika() {
                 style={{ ...inputStyle, width: "min(220px, 100%)" }}
               />
               <div style={{ flex: 1 }} />
-              <button
-                onClick={() => setShowPengaturan(true)}
-                title="Pengaturan soal"
-                aria-label="Pengaturan soal"
-                style={{ ...secondaryBtnStyle, display: "inline-flex", alignItems: "center", gap: 6 }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                </svg>
-                Pengaturan Soal
-              </button>
               <input
                 ref={importInputRef}
                 type="file"
@@ -5896,7 +5985,7 @@ function BankSoalFisika() {
                 }}
               >
                 {soal.length === 0
-                  ? "Belum ada soal. Buka \"Pengaturan Soal\" (ikon gir) lalu pilih \"Tambah Soal\" untuk mulai mengisi bank soal Anda."
+                  ? "Belum ada soal. Pastikan perangkat terhubung ke internet agar soal termuat, lalu muat ulang halaman."
                   : "Tidak ada soal yang cocok dengan filter saat ini."}
               </div>
             ) : (
